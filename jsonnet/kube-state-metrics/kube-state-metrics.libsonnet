@@ -192,12 +192,12 @@
         seccompProfile: { type: 'RuntimeDefault' },
       },
       livenessProbe: { timeoutSeconds: 5, initialDelaySeconds: 5, httpGet: {
-        port: 8080,
-        path: '/healthz',
+        port: "http-metrics",
+        path: '/livez',
       } },
       readinessProbe: { timeoutSeconds: 5, initialDelaySeconds: 5, httpGet: {
-        port: 8081,
-        path: '/',
+        port: "telemetry",
+        path: '/readyz',
       } },
     };
 

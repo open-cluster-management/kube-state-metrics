@@ -1,17 +1,17 @@
-approvers:
-- dislbenn
-- marcolan018
-- subbarao-meduri
-- bjoydeep
-- saswatamcode
-- philipgough
-- douglascamata
-- coleenquadros
-- thibaultmg
-- moadz
-- jacobbaungard
 reviewers:
-- clyang82
-- haoqing0110
-- morvencao
-- ngraham20
+  - CatherineF-dev
+  - dgrisonnet
+  - logicalhan
+  - mrueg
+  - rexagod
+approvers:
+  - dgrisonnet
+  - mrueg
+  - rexagod
+emeritus_approvers:
+  - LiliC
+  - andyxning
+  - brancz
+  - tariq1890
+  - zouyee
+  - fpetkovski

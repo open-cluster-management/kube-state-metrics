@@ -30,6 +30,13 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+	"k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/plugin/pkg/client/auth" // Initialize common client auth plugins.
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
+
+	"github.com/KimMachineGun/automemlimit/memlimit"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -38,10 +45,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
-	"gopkg.in/yaml.v3"
-	_ "k8s.io/client-go/plugin/pkg/client/auth" // Initialize common client auth plugins.
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/klog/v2"
 
 	"k8s.io/kube-state-metrics/v2/internal/discovery"
 	"k8s.io/kube-state-metrics/v2/internal/store"
@@ -59,6 +62,8 @@ import (
 const (
 	metricsPath = "/metrics"
 	healthzPath = "/healthz"
+	livezPath   = "/livez"
+	readyzPath  = "/readyz"
 )
 
 // promLogger implements promhttp.Logger
@@ -153,6 +158,20 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options) error {
 			configSuccessTime.WithLabelValues("config", filepath.Clean(got)).SetToCurrentTime()
 			hash := md5HashAsMetricValue(configFile)
 			configHash.WithLabelValues("config", filepath.Clean(got)).Set(hash)
+		}
+	}
+
+	if opts.AutoGoMemlimit {
+		if _, err := memlimit.SetGoMemLimitWithOpts(
+			memlimit.WithRatio(opts.AutoGoMemlimitRatio),
+			memlimit.WithProvider(
+				memlimit.ApplyFallback(
+					memlimit.FromCgroup,
+					memlimit.FromSystem,
+				),
+			),
+		); err != nil {
+			return fmt.Errorf("failed to set GOMEMLIMIT automatically: %w", err)
 		}
 	}
 
@@ -321,11 +340,14 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options) error {
 		WebConfigFile:      &tlsConfig,
 	}
 
-	metricsMux := buildMetricsServer(m, durationVec)
+	metricsMux := buildMetricsServer(m, durationVec, kubeClient)
 	metricsServerListenAddress := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
 	metricsServer := http.Server{
 		Handler:           metricsMux,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: opts.ServerReadHeaderTimeout,
+		ReadTimeout:       opts.ServerReadTimeout,
+		WriteTimeout:      opts.ServerWriteTimeout,
+		IdleTimeout:       opts.ServerIdleTimeout,
 	}
 	metricsFlags := web.FlagConfig{
 		WebListenAddresses: &[]string{metricsServerListenAddress},
@@ -370,6 +392,18 @@ func buildTelemetryServer(registry prometheus.Gatherer) *http.ServeMux {
 	// Add metricsPath
 	mux.Handle(metricsPath, promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorLog: promLogger{}}))
 
+	// Add readyzPath
+	mux.Handle(readyzPath, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		count, err := util.GatherAndCount(registry)
+		if err != nil || count == 0 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(http.StatusText(http.StatusServiceUnavailable)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(http.StatusText(http.StatusOK)))
+	}))
+
 	// Add index
 	landingConfig := web.LandingConfig{
 		Name:        "kube-state-metrics",
@@ -390,7 +424,20 @@ func buildTelemetryServer(registry prometheus.Gatherer) *http.ServeMux {
 	return mux
 }
 
-func buildMetricsServer(m *metricshandler.MetricsHandler, durationObserver prometheus.ObserverVec) *http.ServeMux {
+func handleClusterDelegationForProber(client kubernetes.Interface, probeType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		got := client.CoreV1().RESTClient().Get().AbsPath(probeType).Do(context.Background())
+		if got.Error() != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(http.StatusText(http.StatusServiceUnavailable)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(http.StatusText(http.StatusOK)))
+	}
+}
+
+func buildMetricsServer(m *metricshandler.MetricsHandler, durationObserver prometheus.ObserverVec, client kubernetes.Interface) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// TODO: This doesn't belong into serveMetrics
@@ -400,10 +447,14 @@ func buildMetricsServer(m *metricshandler.MetricsHandler, durationObserver prome
 	mux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
 	mux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
 
+	// Add metricsPath
 	mux.Handle(metricsPath, promhttp.InstrumentHandlerDuration(durationObserver, m))
 
+	// Add livezPath
+	mux.Handle(livezPath, handleClusterDelegationForProber(client, livezPath))
+
 	// Add healthzPath
-	mux.HandleFunc(healthzPath, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(healthzPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(http.StatusText(http.StatusOK)))
 	})
@@ -421,6 +472,10 @@ func buildMetricsServer(m *metricshandler.MetricsHandler, durationObserver prome
 			{
 				Address: healthzPath,
 				Text:    "Healthz",
+			},
+			{
+				Address: livezPath,
+				Text:    "Livez",
 			},
 		},
 	}

@@ -4,6 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubernetes/kube-state-metrics)](https://goreportcard.com/report/github.com/kubernetes/kube-state-metrics)
 [![Go Reference](https://pkg.go.dev/badge/github.com/kubernetes/kube-state-metrics.svg)](https://pkg.go.dev/github.com/kubernetes/kube-state-metrics)
 [![govulncheck](https://github.com/kubernetes/kube-state-metrics/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/kubernetes/kube-state-metrics/actions/workflows/govulncheck.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8696/badge)](https://www.bestpractices.dev/projects/8696)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubernetes/kube-state-metrics/badge)](https://api.securityscorecards.dev/projects/github.com/kubernetes/kube-state-metrics)
 
 kube-state-metrics (KSM) is a simple service that listens to the Kubernetes API
@@ -59,6 +60,7 @@ are deleted they are no longer visible on the `/metrics` endpoint.
   * [Helm Chart](#helm-chart)
   * [Development](#development)
   * [Developer Contributions](#developer-contributions)
+  * [Community](#community)
 
 ### Versioning
 
@@ -205,7 +207,7 @@ In a 100 node cluster scaling test the latency numbers were as follows:
 
 ### A note on costing
 
-By default, kube-state-metrics exposes several metrics for events across your cluster. If you have a large number of frequently-updating resources on your cluster, you may find that a lot of data is ingested into these metrics. This can incur high costs on some cloud providers. Please take a moment to [configure what metrics you'd like to expose](docs/cli-arguments.md), as well as consult the documentation for your Kubernetes environment in order to avoid unexpectedly high costs.
+By default, kube-state-metrics exposes several metrics for events across your cluster. If you have a large number of frequently-updating resources on your cluster, you may find that a lot of data is ingested into these metrics. This can incur high costs on some cloud providers. Please take a moment to [configure what metrics you'd like to expose](docs/developer/cli-arguments.md), as well as consult the documentation for your Kubernetes environment in order to avoid unexpectedly high costs.
 
 ### kube-state-metrics vs. metrics-server
 
@@ -343,6 +345,16 @@ Note that your GCP identity is case sensitive but `gcloud info` as of Google Clo
 
 After running the above, if you see `Clusterrolebinding "cluster-admin-binding" created`, then you are able to continue with the setup of this service.
 
+#### Healthcheck Endpoints
+
+The following healthcheck endpoints are available (`self` refers to the telemetry port, while `main` refers to the exposition port):
+
+* `/healthz` (exposed on `main`): Returns a 200 status code if the application is running. We recommend to use this for the startup probe.
+* `/livez` (exposed on `main`): Returns a 200 status code if the application is not affected by an outage of the Kubernetes API Server. We recommend to using this for the liveness probe.
+* `/readyz` (exposed on `self`): Returns a 200 status code if the application is ready to accept requests and expose metrics. We recommend using this for the readiness probe.
+
+Note that it is discouraged to use the telemetry metrics endpoint for any probe when proxying the exposition data.
+
 #### Limited privileges environment
 
 If you want to run kube-state-metrics in an environment where you don't have cluster-reader role, you can:
@@ -388,7 +400,7 @@ spec:
           - '--namespaces=project1'
 ```
 
-For the full list of arguments available, see the documentation in [docs/cli-arguments.md](./docs/cli-arguments.md)
+For the full list of arguments available, see the documentation in [docs/developer/cli-arguments.md](./docs/developer/cli-arguments.md)
 
 #### Helm Chart
 
@@ -413,3 +425,15 @@ To run the e2e tests locally see the documentation in [tests/README.md](./tests/
 #### Developer Contributions
 
 When developing, there are certain code patterns to follow to better your contributing experience and likelihood of e2e and other ci tests to pass. To learn more about them, see the documentation in [docs/developer/guide.md](./docs/developer/guide.md).
+
+#### Community
+
+This project is sponsored by [SIG Instrumentation](https://github.com/kubernetes/community/tree/master/sig-instrumentation).
+
+There is also a channel for [#kube-state-metrics](https://kubernetes.slack.com/archives/CJJ529RUY) on Kubernetes' Slack.
+
+You can also join the SIG Instrumentation [mailing list](https://groups.google.com/forum/#!forum/kubernetes-sig-instrumentation).
+This will typically add invites for the following meetings to your calendar, in which topics around kube-state-metrics can be discussed.
+
+* Regular SIG Meeting: [Thursdays at 9:30 PT (Pacific Time)](https://zoom.us/j/5342565819?pwd=RlVsK21NVnR1dmE3SWZQSXhveHZPdz09) (biweekly). [Convert to your timezone](http://www.thetimezoneconverter.com/?t=9:30&tz=PT%20%28Pacific%20Time%29).
+* Regular Triage Meeting: [Thursdays at 9:30 PT (Pacific Time)](https://zoom.us/j/5342565819?pwd=RlVsK21NVnR1dmE3SWZQSXhveHZPdz09) (biweekly - alternating with regular meeting). [Convert to your timezone](http://www.thetimezoneconverter.com/?t=9:30&tz=PT%20%28Pacific%20Time%29).

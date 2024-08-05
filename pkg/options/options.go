@@ -21,16 +21,29 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/prometheus/common/version"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
 
+var (
+	// Align with the default scrape interval from Prometheus: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config
+	defaultServerReadTimeout  = 60 * time.Second
+	defaultServerWriteTimeout = 60 * time.Second
+	// ServerIdleTimeout is set to 5 minutes to match the default idle timeout of Prometheus scrape clients
+	// https://github.com/prometheus/common/blob/318309999517402ad522877ac7e55fa650a11114/config/http_config.go#L55
+	defaultServerIdleTimeout       = 5 * time.Minute
+	defaultServerReadHeaderTimeout = 5 * time.Second
+)
+
 // Options are the configurable parameters for kube-state-metrics.
 type Options struct {
 	AnnotationsAllowList     LabelsAllowList `yaml:"annotations_allow_list"`
 	Apiserver                string          `yaml:"apiserver"`
+	AutoGoMemlimit           bool            `yaml:"auto-gomemlimit"`
+	AutoGoMemlimitRatio      float64         `yaml:"auto-gomemlimit-ratio"`
 	CustomResourceConfig     string          `yaml:"custom_resource_config"`
 	CustomResourceConfigFile string          `yaml:"custom_resource_config_file"`
 	CustomResourcesOnly      bool            `yaml:"custom_resources_only"`
@@ -55,6 +68,10 @@ type Options struct {
 	TelemetryPort            int             `yaml:"telemetry_port"`
 	TotalShards              int             `yaml:"total_shards"`
 	UseAPIServerCache        bool            `yaml:"use_api_server_cache"`
+	ServerReadTimeout        time.Duration   `yaml:"server_read_timeout"`
+	ServerWriteTimeout       time.Duration   `yaml:"server_write_timeout"`
+	ServerIdleTimeout        time.Duration   `yaml:"server_idle_timeout"`
+	ServerReadHeaderTimeout  time.Duration   `yaml:"server_read_header_timeout"`
 
 	Config string
 
@@ -83,7 +100,7 @@ func NewOptions() *Options {
 func (o *Options) AddFlags(cmd *cobra.Command) {
 	o.cmd = cmd
 
-	completionCommand.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+	completionCommand.SetHelpFunc(func(_ *cobra.Command, _ []string) {
 		if shellPath, ok := os.LookupEnv("SHELL"); ok {
 			shell := shellPath[strings.LastIndex(shellPath, "/")+1:]
 			fmt.Println(FetchLoadInstructions(shell))
@@ -97,7 +114,7 @@ func (o *Options) AddFlags(cmd *cobra.Command) {
 	versionCommand := &cobra.Command{
 		Use:   "version",
 		Short: "Print version information.",
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Printf("%s\n", version.Print("kube-state-metrics"))
 			klog.FlushAndExit(klog.ExitFlushTimeout, 0)
 		},
@@ -128,6 +145,8 @@ func (o *Options) AddFlags(cmd *cobra.Command) {
 	o.cmd.Flags().IntVar(&o.TelemetryPort, "telemetry-port", 8081, `Port to expose kube-state-metrics self metrics on.`)
 	o.cmd.Flags().IntVar(&o.TotalShards, "total-shards", 1, "The total number of shards. Sharding is disabled when total shards is set to 1.")
 	o.cmd.Flags().StringVar(&o.Apiserver, "apiserver", "", `The URL of the apiserver to use as a master`)
+	o.cmd.Flags().BoolVar(&o.AutoGoMemlimit, "auto-gomemlimit", false, "Automatically set GOMEMLIMIT to match container or system memory limit. (experimental)")
+	o.cmd.Flags().Float64Var(&o.AutoGoMemlimitRatio, "auto-gomemlimit-ratio", float64(0.9), "The ratio of reserved GOMEMLIMIT memory to the detected maximum container or system memory. (experimental)")
 	o.cmd.Flags().StringVar(&o.CustomResourceConfig, "custom-resource-state-config", "", "Inline Custom Resource State Metrics config YAML (experimental)")
 	o.cmd.Flags().StringVar(&o.CustomResourceConfigFile, "custom-resource-state-config-file", "", "Path to a Custom Resource State Metrics config file (experimental)")
 	o.cmd.Flags().StringVar(&o.Host, "host", "::", `Host to expose metrics on.`)
@@ -146,6 +165,11 @@ func (o *Options) AddFlags(cmd *cobra.Command) {
 	o.cmd.Flags().Var(&o.Namespaces, "namespaces", fmt.Sprintf("Comma-separated list of namespaces to be enabled. Defaults to %q", &DefaultNamespaces))
 	o.cmd.Flags().Var(&o.NamespacesDenylist, "namespaces-denylist", "Comma-separated list of namespaces not to be enabled. If namespaces and namespaces-denylist are both set, only namespaces that are excluded in namespaces-denylist will be used.")
 	o.cmd.Flags().Var(&o.Resources, "resources", fmt.Sprintf("Comma-separated list of Resources to be enabled. Defaults to %q", &DefaultResources))
+
+	o.cmd.Flags().DurationVar(&o.ServerReadTimeout, "server-read-timeout", defaultServerReadTimeout, "The maximum duration for reading the entire request, including the body. Align with the scrape interval or timeout of scraping clients. ")
+	o.cmd.Flags().DurationVar(&o.ServerWriteTimeout, "server-write-timeout", defaultServerWriteTimeout, "The maximum duration before timing out writes of the response. Align with the scrape interval or timeout of scraping clients..")
+	o.cmd.Flags().DurationVar(&o.ServerIdleTimeout, "server-idle-timeout", defaultServerIdleTimeout, "The maximum amount of time to wait for the next request when keep-alives are enabled. Align with the idletimeout of your scrape clients.")
+	o.cmd.Flags().DurationVar(&o.ServerReadHeaderTimeout, "server-read-header-timeout", defaultServerReadHeaderTimeout, "The maximum duration for reading the header of requests.")
 }
 
 // Parse parses the flag definitions from the argument list.
@@ -170,5 +194,10 @@ func (o *Options) Validate() error {
 			return fmt.Errorf("resource %s can't be sharded by field selector spec.nodeName", x)
 		}
 	}
+
+	if o.AutoGoMemlimitRatio <= 0.0 || o.AutoGoMemlimitRatio > 1.0 {
+		return fmt.Errorf("value for --auto-gomemlimit-ratio=%f must be greater than 0 and less than or equal to 1", o.AutoGoMemlimitRatio)
+	}
+
 	return nil
 }
