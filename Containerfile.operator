@@ -11,7 +11,6 @@ RUN make -f Makefile.prow build-local
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
-RUN microdnf update -y && microdnf clean all
 LABEL io.k8s.display-name="kube-state-metrics" \
       io.k8s.description="This is a component that exposes metrics about Kubernetes objects." \
       summary="This is a component that exposes metrics about Kubernetes objects."
