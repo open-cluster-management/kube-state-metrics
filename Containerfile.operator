@@ -18,3 +18,13 @@ LABEL io.k8s.display-name="kube-state-metrics" \
 COPY --from=builder /workspace/kube-state-metrics  /usr/bin/kube-state-metrics
 USER nobody
 ENTRYPOINT ["/usr/bin/kube-state-metrics"]
+
+LABEL com.redhat.component="kube-state-metrics" \
+name="kube-state-metrics" \
+summary="kube-state-metrics" \
+io.openshift.expose-services="" \
+io.openshift.tags="data,images" \
+io.k8s.display-name="kube-state-metrics" \
+maintainer="" \
+description="kube-state-metrics" \
+io.k8s.description="kube-state-metrics"
